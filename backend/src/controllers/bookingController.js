@@ -1,15 +1,11 @@
 import { db } from "../config/firebase.js";
 import { io } from "../index.js";
 
-// Designated Days Configuration
-// Batch 1: Mon (1), Tue (2), Wed (3)
-// Batch 2: Thu (4), Fri (5)
 const isDesignatedProcessingDay = (batch, date) => {
-  // Ensure date is treated as local time by appending T00:00:00 if it's just YYYY-MM-DD
   const dateObj = new Date(date.includes("T") ? date : date + "T00:00:00");
-  const day = dateObj.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const day = dateObj.getDay();
 
-  if (day === 0 || day === 6) return false; // Weekend - no office?
+  if (day === 0 || day === 6) return false;
 
   if (batch === 1) {
     return [1, 2, 3].includes(day); // Mon, Tue, Wed
@@ -26,23 +22,40 @@ const getDailyStatsId = (dateStr) => {
 
 export const bookSeat = async (req, res) => {
   try {
-    const { userId, userName, batch, date, type } = req.body;
+    const { userId, userName, batch, date, type, seatId } = req.body;
     // date format: "2023-10-27"
+    // seatId should be 1-50
 
-    if (!userId || !batch || !date || !type) {
-      return res.status(400).json({ error: "Missing required fields" });
+    if (!userId || !batch || !date || !type || !seatId) {
+      return res
+        .status(400)
+        .json({ error: "Missing required fields (including seatId)" });
+    }
+
+    if (seatId < 1 || seatId > 50) {
+      return res
+        .status(400)
+        .json({ error: "Invalid seatId. Must be between 1 and 50." });
     }
 
     const bookingRef = db.collection("bookings").doc(`${date}_${userId}`);
+    const specificSeatRef = db
+      .collection("bookedSeats")
+      .doc(`${date}_${seatId}`);
     const dailyStatsRef = db
       .collection("dailyStats")
       .doc(getDailyStatsId(date));
 
-    // Run as a transaction to ensure seat counts are atomic
+    // Run as a transaction to ensure seat counts and specific seat locking are atomic
     await db.runTransaction(async (t) => {
       const bookingDoc = await t.get(bookingRef);
       if (bookingDoc.exists) {
-        throw new Error("User already has a booking for this date");
+        throw new Error("You already have a booking for this date.");
+      }
+
+      const specificSeatDoc = await t.get(specificSeatRef);
+      if (specificSeatDoc.exists) {
+        throw new Error(`Seat #${seatId} is already booked by someone else.`);
       }
 
       const dailyStatsDoc = await t.get(dailyStatsRef);
@@ -78,6 +91,9 @@ export const bookSeat = async (req, res) => {
             "Today is not your designated day. You must book a floating seat.",
           );
         }
+        if (seatId > 40) {
+          throw new Error("Designated seats must be chosen from Seats 1-40.");
+        }
 
         t.set(bookingRef, {
           userId,
@@ -85,8 +101,17 @@ export const bookSeat = async (req, res) => {
           batch,
           date,
           type: "designated",
+          seatId,
           status: "confirmed",
           createdAt: new Date().toISOString(),
+        });
+
+        t.set(specificSeatRef, {
+          userId,
+          userName,
+          date,
+          type: "designated",
+          seatId,
         });
 
         t.set(dailyStatsRef, {
@@ -97,6 +122,11 @@ export const bookSeat = async (req, res) => {
         if (!isAfterCutoff) {
           throw new Error(
             "Floating seats can only be booked after 3 PM the day before.",
+          );
+        }
+        if (seatId < 41 || seatId > 50) {
+          throw new Error(
+            "Floating seats must be chosen from the Buffer Pool (Seats 41-50).",
           );
         }
 
@@ -118,8 +148,17 @@ export const bookSeat = async (req, res) => {
           batch,
           date,
           type: "floating",
+          seatId,
           status: "confirmed",
           createdAt: new Date().toISOString(),
+        });
+
+        t.set(specificSeatRef, {
+          userId,
+          userName,
+          date,
+          type: "floating",
+          seatId,
         });
 
         // If after cutoff, we are consuming what was potentially a designated seat
@@ -166,6 +205,10 @@ export const releaseSeat = async (req, res) => {
       }
 
       const bookingData = bookingDoc.data();
+      const specificSeatRef = db
+        .collection("bookedSeats")
+        .doc(`${date}_${bookingData.seatId}`);
+
       const dailyStatsDoc = await t.get(dailyStatsRef);
 
       if (!dailyStatsDoc.exists) {
@@ -177,6 +220,7 @@ export const releaseSeat = async (req, res) => {
       // If it's a Designated Seat being released -> It becomes a Floating Seat for others
       if (bookingData.type === "designated") {
         t.delete(bookingRef);
+        t.delete(specificSeatRef);
 
         // Update stats:
         // - decrease designatedCount
@@ -191,6 +235,7 @@ export const releaseSeat = async (req, res) => {
       // If it's a Floating Seat being released -> Just free up the space
       else if (bookingData.type === "floating") {
         t.delete(bookingRef);
+        t.delete(specificSeatRef);
 
         t.update(dailyStatsRef, {
           floatingCount: (dailyData.floatingCount || 0) - 1,
@@ -256,6 +301,35 @@ export const getBookingStatus = async (req, res) => {
           (stats.totalFloatingAvailable || 10) - (stats.floatingCount || 0),
       });
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const getDailyBookedSeats = async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) {
+      return res.status(400).json({ error: "Date parameter is required" });
+    }
+
+    const snapshot = await db
+      .collection("bookedSeats")
+      .where("date", "==", date)
+      .get();
+
+    const bookedSeats = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      bookedSeats.push({
+        seatId: data.seatId,
+        type: data.type,
+        userName: data.userName, // To show who booked it if needed
+        userId: data.userId, // Helpful for identifying "your" seat
+      });
+    });
+
+    res.status(200).json(bookedSeats);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

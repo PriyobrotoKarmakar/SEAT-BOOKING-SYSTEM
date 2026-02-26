@@ -1,10 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-/**
- * Verifies a Firebase ID token using the Firebase REST API.
- * No service account key required — uses the Web API key.
- */
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -34,7 +30,7 @@ const authMiddleware = async (req, res, next) => {
       throw new Error('User not found');
     }
 
-    // Attach verified user info to request
+  
     req.user = {
       uid: data.users[0].localId,
       email: data.users[0].email,

@@ -8,10 +8,9 @@ export const SOCKET_URL = import.meta.env.VITE_API_URL
   : "http://localhost:5000";
 
 export const socket = io(SOCKET_URL, {
-  autoConnect: false, // Connect manually when needed
+  autoConnect: false,
 });
 
-// Get the current Firebase user's ID token to attach to API calls
 const getAuthHeader = async () => {
   const user = auth.currentUser;
   if (!user) return {};
@@ -52,7 +51,7 @@ export const api = {
     },
   },
   seats: {
-    bookDesignated: async (user, date) => {
+    bookDesignated: async (user, date, seatId) => {
       const authHeader = await getAuthHeader();
       const response = await fetch(`${API_BASE_URL}/bookings/book/designated`, {
         method: "POST",
@@ -62,6 +61,7 @@ export const api = {
           userName: user.name,
           batch: user.batch,
           date,
+          seatId,
         }),
       });
       if (!response.ok) {
@@ -70,7 +70,7 @@ export const api = {
       }
       return response.json();
     },
-    bookFloating: async (user, date) => {
+    bookFloating: async (user, date, seatId) => {
       const authHeader = await getAuthHeader();
       const response = await fetch(`${API_BASE_URL}/bookings/book/floating`, {
         method: "POST",
@@ -80,6 +80,7 @@ export const api = {
           userName: user.name,
           batch: user.batch,
           date,
+          seatId,
         }),
       });
       if (!response.ok) {
@@ -127,6 +128,19 @@ export const api = {
       );
       if (!response.ok) {
         throw new Error("Failed to get weekly data");
+      }
+      return response.json();
+    },
+    getDailyBookedSeats: async (date) => {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(
+        `${API_BASE_URL}/bookings/dailyBookedSeats?date=${date}`,
+        {
+          headers: { ...authHeader },
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Failed to get daily booked seats");
       }
       return response.json();
     },

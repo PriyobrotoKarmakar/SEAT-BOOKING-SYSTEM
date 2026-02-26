@@ -14,7 +14,7 @@ const firebaseConfig = {
   measurementId: process.env.FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase using compat to support existing db.collection() syntax
+
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }

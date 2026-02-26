@@ -18,7 +18,6 @@ const Dashboard = () => {
     () => new Date().toISOString().split("T")[0],
   );
 
-  // Create Date object factoring in local timezone strictly for UI display logic
   const selectedDateObj = new Date(selectedDate + "T00:00:00");
   const currentDay = selectedDateObj.toLocaleDateString("en-US", {
     weekday: "long",
@@ -26,27 +25,37 @@ const Dashboard = () => {
 
   const [floatingSeats, setFloatingSeats] = useState(10);
   const [bookingStatus, setBookingStatus] = useState(null);
+  const [bookedSeatId, setBookedSeatId] = useState(null);
   const [weeklyData, setWeeklyData] = useState([]);
+
+  // Seat Grid States
+  const [dailyBookedSeats, setDailyBookedSeats] = useState([]);
+  const [selectedSeatId, setSelectedSeatId] = useState(null);
 
   const batch1Days = ["Monday", "Tuesday", "Wednesday"];
   const batch2Days = ["Thursday", "Friday"];
 
-  // Fetch initial status on load and when selectedDate changes
   useEffect(() => {
     const fetchData = async () => {
       try {
         const userId = user.uid || user.name;
-        // Pass selectedDate to getStatus
+
         const data = await api.seats.getStatus(userId, selectedDate);
         if (data.booked) {
           setBookingStatus(data.type); // "designated" or "floating"
+          setBookedSeatId(data.seatId);
         } else {
           setBookingStatus(null);
+          setBookedSeatId(null);
           // Only update floating seats if data provides it
           if (data.availableFloating !== undefined) {
             setFloatingSeats(data.availableFloating);
           }
         }
+
+        // Fetch daily seat map
+        const bookedList = await api.seats.getDailyBookedSeats(selectedDate);
+        setDailyBookedSeats(bookedList);
 
         // Fetch weekly roster data
         const today = new Date();
@@ -113,10 +122,16 @@ const Dashboard = () => {
   const canBookFloating = !isDesignatedDay && isAfterCutoff;
 
   const handleBookDesignated = async () => {
+    if (!selectedSeatId) {
+      toast.error("Please click on a seat from the map before booking.");
+      return;
+    }
     try {
-      await api.seats.bookDesignated(user, selectedDate); // Pass full user object and date
+      await api.seats.bookDesignated(user, selectedDate, selectedSeatId);
       setBookingStatus("designated");
-      toast.success("Designated seat booked successfully!");
+      setBookedSeatId(selectedSeatId);
+      setSelectedSeatId(null);
+      toast.success(`Designated seat #${selectedSeatId} booked successfully!`);
     } catch (error) {
       console.error(error);
       toast.error(error.message || "Failed to book designated seat.");
@@ -124,12 +139,18 @@ const Dashboard = () => {
   };
 
   const handleBookFloating = async () => {
+    if (!selectedSeatId) {
+      toast.error("Please click on a seat from the map before booking.");
+      return;
+    }
     if (floatingSeats > 0) {
       try {
-        await api.seats.bookFloating(user, selectedDate); // Pass full user object and date
+        await api.seats.bookFloating(user, selectedDate, selectedSeatId);
         setFloatingSeats((prev) => prev - 1);
         setBookingStatus("floating");
-        toast.success("Floating seat booked successfully!");
+        setBookedSeatId(selectedSeatId);
+        setSelectedSeatId(null);
+        toast.success(`Floating seat #${selectedSeatId} booked successfully!`);
       } catch (error) {
         console.error(error);
         toast.error(error.message || "Failed to book floating seat.");
@@ -139,8 +160,9 @@ const Dashboard = () => {
 
   const handleReleaseSeat = async () => {
     try {
-      await api.seats.release(user, selectedDate); // Pass full user object and date
+      await api.seats.release(user, selectedDate);
       setBookingStatus(null);
+      setBookedSeatId(null);
 
       // Re-fetch status to get accurate count
       const userId = user.uid || user.name;
@@ -199,60 +221,227 @@ const Dashboard = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                {isDesignatedDay ? (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-blue-50 text-blue-800 rounded-lg border border-blue-100">
-                      <p className="font-medium flex items-center gap-2">
-                        <CheckCircle size={18} />
-                        Today is your Designated Day
-                      </p>
-                    </div>
+                <div>
+                  <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-slate-500" />
+                    50-Seat Virtual Floor Plan
+                  </h4>
 
-                    {!bookingStatus ? (
-                      <Button
-                        onClick={handleBookDesignated}
-                        className="w-full bg-blue-600 hover:bg-blue-700"
-                      >
-                        Confirm Designated Seat
-                      </Button>
+                  <div className="grid grid-cols-10 gap-2 mb-4">
+                    {Array.from({ length: 50 }, (_, i) => i + 1).map(
+                      (seatId) => {
+                        const isBooked = dailyBookedSeats.find(
+                          (s) => s.seatId === seatId,
+                        );
+                        const isMySeat =
+                          isBooked &&
+                          isBooked.userId === (user.uid || user.name);
+                        const isSelected = selectedSeatId === seatId;
+
+                        // Logic Enforcement:
+                        // If it's your designated day, you MUST book 1-40.
+                        // If it's NOT your designated day, you MUST book 41-50.
+                        const isInvalidZone = isDesignatedDay
+                          ? seatId > 40
+                          : seatId <= 40;
+
+                        let bgClass =
+                          "bg-green-100 hover:bg-green-200 border-green-300 text-green-700 cursor-pointer";
+
+                        if (isMySeat)
+                          bgClass =
+                            "bg-blue-500 border-blue-600 text-white cursor-not-allowed shadow-inner ring-2 ring-blue-300";
+                        else if (isBooked)
+                          bgClass =
+                            "bg-slate-200 border-slate-300 text-slate-400 cursor-not-allowed opacity-70";
+                        else if (isSelected)
+                          bgClass =
+                            "bg-yellow-100 border-yellow-400 text-yellow-700 ring-2 ring-yellow-400";
+                        else if (isInvalidZone && !bookingStatus)
+                          bgClass =
+                            "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-50"; // Dim unavailable zones
+
+                        // Visual Separator for the Buffer Pool (41-50)
+                        const isBufferSeat = seatId > 40;
+
+                        return (
+                          <div
+                            key={seatId}
+                            onClick={() => {
+                              if (
+                                !isBooked &&
+                                !bookingStatus &&
+                                !isInvalidZone
+                              ) {
+                                setSelectedSeatId(
+                                  seatId === selectedSeatId ? null : seatId,
+                                );
+                              } else if (isInvalidZone && !bookingStatus) {
+                                toast.warning(
+                                  isDesignatedDay
+                                    ? "Please select a Designated Seat (1-40)."
+                                    : "Please select a Buffer Seat (41-50).",
+                                );
+                              }
+                            }}
+                            className={`
+                            h-10 rounded-md border text-xs font-bold flex items-center justify-center transition-all duration-200 select-none
+                            ${bgClass}
+                            ${isBufferSeat ? "border-orange-300 ring-1 ring-orange-200" : ""}
+                            ${!isBooked && !bookingStatus && !isInvalidZone ? "active:scale-95 hover:shadow-sm" : ""}
+                          `}
+                            title={
+                              isMySeat
+                                ? "Your booked seat"
+                                : isBooked
+                                  ? `Booked by ${isBooked.userName}`
+                                  : isInvalidZone
+                                    ? "Not available for your current booking type"
+                                    : "Available"
+                            }
+                          >
+                            {seatId}
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex gap-4 text-xs text-slate-500 mb-6 flex-wrap justify-center border-b pb-4">
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-green-200 border border-green-300"></div>{" "}
+                      Available (Your Zone)
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-slate-100 border border-slate-200 opacity-50"></div>{" "}
+                      Unavailable Zone
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-yellow-200 border border-yellow-400"></div>{" "}
+                      Selected
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-slate-200 border border-slate-300"></div>{" "}
+                      Taken
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-blue-500 border border-blue-600"></div>{" "}
+                      Yours
+                    </div>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex gap-4 text-xs text-slate-500 mb-6 justify-center">
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-green-200 border border-green-300"></div>{" "}
+                      Available
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-yellow-200 border border-yellow-400"></div>{" "}
+                      Selected
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-slate-200 border border-slate-300"></div>{" "}
+                      Taken
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 rounded-full bg-blue-500 border border-blue-600"></div>{" "}
+                      Yours
+                    </div>
+                  </div>
+                </div>
+
+                {!bookingStatus ? (
+                  <div className="space-y-4 border-t pt-4">
+                    {isDesignatedDay ? (
+                      <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
+                        <div className="flex justify-between items-center mb-2">
+                          <div>
+                            <h4 className="font-semibold text-emerald-800">
+                              Designated Booking
+                            </h4>
+                            <p className="text-sm text-emerald-600">
+                              It's {currentDay} — your batch's designated day.
+                            </p>
+                          </div>
+                          <CheckCircle className="h-5 w-5 text-emerald-500" />
+                        </div>
+                        <Button
+                          onClick={handleBookDesignated}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 mt-2"
+                          disabled={!selectedSeatId}
+                        >
+                          {selectedSeatId
+                            ? `Book Seat #${selectedSeatId}`
+                            : "Select a seat above"}
+                        </Button>
+                      </div>
                     ) : (
-                      <Button
-                        onClick={handleReleaseSeat}
-                        variant="destructive"
-                        className="w-full"
-                      >
-                        Not Coming? Release Seat
-                      </Button>
+                      <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                        <div className="flex justify-between items-center mb-2">
+                          <div>
+                            <h4 className="font-semibold text-orange-800">
+                              Floating Booking
+                            </h4>
+                            <p className="text-sm text-orange-600">
+                              {isAfterCutoff
+                                ? "Floating seats are now available to book for tomorrow."
+                                : "You must wait until 3 PM the day prior to book a floating seat."}
+                            </p>
+                          </div>
+                          <Clock className="h-5 w-5 text-orange-500" />
+                        </div>
+                        <div className="mt-2 text-sm font-medium text-slate-700 bg-white inline-block px-3 py-1 rounded-full border mb-3">
+                          Buffer Available:{" "}
+                          <span
+                            className={
+                              floatingSeats > 0
+                                ? "text-green-600"
+                                : "text-red-500"
+                            }
+                          >
+                            {floatingSeats}
+                          </span>
+                        </div>
+                        <Button
+                          onClick={handleBookFloating}
+                          disabled={
+                            !canBookFloating ||
+                            floatingSeats === 0 ||
+                            !selectedSeatId
+                          }
+                          className="w-full bg-orange-500 hover:bg-orange-600"
+                        >
+                          {!canBookFloating
+                            ? "Not available yet"
+                            : floatingSeats === 0
+                              ? "Pool Empty"
+                              : selectedSeatId
+                                ? `Book Buffer Seat #${selectedSeatId}`
+                                : "Select a seat above"}
+                        </Button>
+                      </div>
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-orange-50 text-orange-800 rounded-lg border border-orange-100 flex justify-between items-center">
-                      <p className="font-medium">Buffer Seats Available</p>
-                      <span className="text-2xl font-bold">
-                        {floatingSeats}
-                      </span>
+                  <div className="bg-slate-100 rounded-lg p-6 text-center border">
+                    <div className="mx-auto w-12 h-12 bg-white rounded-full flex items-center justify-center mb-3 shadow-sm text-emerald-500">
+                      <CheckCircle className="h-6 w-6" />
                     </div>
-
-                    {!bookingStatus ? (
-                      <Button
-                        onClick={handleBookFloating}
-                        disabled={!canBookFloating || floatingSeats === 0}
-                        className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300"
-                      >
-                        {canBookFloating
-                          ? "Book Floating Seat"
-                          : "Unlocks at 3 PM day prior"}
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={handleReleaseSeat}
-                        variant="outline"
-                        className="w-full border-red-200 text-red-600 hover:bg-red-50"
-                      >
-                        Cancel Floating Booking
-                      </Button>
-                    )}
+                    <h4 className="font-semibold text-slate-800">
+                      Seat #{bookedSeatId} Booked
+                    </h4>
+                    <p className="text-sm text-slate-500 mt-1 mb-4 capitalize">
+                      {bookingStatus} Reservation
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={handleReleaseSeat}
+                      className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      Release Seat
+                    </Button>
                   </div>
                 )}
               </CardContent>

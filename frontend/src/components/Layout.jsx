@@ -18,7 +18,7 @@ const Layout = ({ children, user }) => {
       <Navbar user={user} onMenuClick={toggleSidebar} />
       <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
       
-      {/* Main Content */}
+      
       <main className="md:pl-64 pt-16">
         <div className="p-6">
           {children}

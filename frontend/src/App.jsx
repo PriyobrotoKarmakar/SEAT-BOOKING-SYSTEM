@@ -10,7 +10,7 @@ import Signup from "./pages/Signup";
 import Profile from "./pages/Profile";
 import "./App.css";
 
-// Protected route — redirects to /login if not authenticated
+
 const ProtectedRoute = ({ children }) => {
   const user = localStorage.getItem("user");
   return user ? children : <Navigate to="/login" replace />;

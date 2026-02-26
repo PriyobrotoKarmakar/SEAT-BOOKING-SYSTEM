@@ -4,15 +4,13 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // In a real app, use Firebase Auth or bcrypt for password hashing
-    // For this prototype, we'll simluate login by checking the 'users' collection
-    // or just return success if user exists.
+
 
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    // Mock search for user by email
+  
     const usersRef = db.collection("users");
     const snapshot = await usersRef.where("email", "==", email).limit(1).get();
 
@@ -23,7 +21,7 @@ export const login = async (req, res) => {
     const userDoc = snapshot.docs[0];
     const userData = userDoc.data();
 
-    // Mock password validaton (DO NOT USE IN PRODUCTION)
+  
     if (userData.password !== password) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -51,7 +49,7 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
-    // Check if user already exists
+   
     const usersRef = db.collection("users");
     const snapshot = await usersRef.where("email", "==", email).get();
 
@@ -59,11 +57,11 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     }
 
-    // Create new user
+   
     const newUser = {
       name,
       email,
-      password, // Note: Hash this in production!
+      password, 
       batch: parseInt(batch),
       squad: parseInt(squad),
       createdAt: new Date().toISOString(),
@@ -105,7 +103,7 @@ export const updateProfile = async (req, res) => {
 
     await userRef.update(updateData);
 
-    // Fetch updated data to return
+   
     const updatedDoc = await userRef.get();
     const userData = updatedDoc.data();
 
@@ -114,7 +112,7 @@ export const updateProfile = async (req, res) => {
       user: {
         uid: updatedDoc.id,
         name: userData.name,
-        email: userData.email, // email usually shouldn't change without verification
+        email: userData.email,
         batch: userData.batch,
         squad: userData.squad,
       },

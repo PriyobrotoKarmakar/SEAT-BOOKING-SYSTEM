@@ -28,17 +28,17 @@ io.on("connection", (socket) => {
   });
 });
 
-// Middleware
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic health check route
+
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK", message: "Server is running" });
 });
 
-// Routes
+
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/auth", authRoutes);
 
