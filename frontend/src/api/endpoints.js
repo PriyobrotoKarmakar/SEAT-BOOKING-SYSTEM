@@ -1,6 +1,15 @@
-import { auth } from '../lib/firebase';
+import { auth } from "../lib/firebase";
+import { io } from "socket.io-client";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+export const SOCKET_URL = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL.replace("/api", "")
+  : "http://localhost:5000";
+
+export const socket = io(SOCKET_URL, {
+  autoConnect: false, // Connect manually when needed
+});
 
 // Get the current Firebase user's ID token to attach to API calls
 const getAuthHeader = async () => {
@@ -28,18 +37,31 @@ export const api = {
       });
       return response.json();
     },
+    updateProfile: async (data) => {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(`${API_BASE_URL}/auth/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to update profile");
+      }
+      return response.json();
+    },
   },
   seats: {
-    bookDesignated: async (user) => {
+    bookDesignated: async (user, date) => {
       const authHeader = await getAuthHeader();
       const response = await fetch(`${API_BASE_URL}/bookings/book/designated`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        // Backend expects: { userId, userName, batch, date (optional, defaults to today) }
-        body: JSON.stringify({ 
-          userId: user.uid || user.name, // Use uid if available from login
-          userName: user.name, 
-          batch: user.batch 
+        body: JSON.stringify({
+          userId: user.uid || user.name,
+          userName: user.name,
+          batch: user.batch,
+          date,
         }),
       });
       if (!response.ok) {
@@ -48,15 +70,16 @@ export const api = {
       }
       return response.json();
     },
-    bookFloating: async (user) => {
+    bookFloating: async (user, date) => {
       const authHeader = await getAuthHeader();
       const response = await fetch(`${API_BASE_URL}/bookings/book/floating`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ 
-          userId: user.uid || user.name, 
-          userName: user.name, 
-          batch: user.batch 
+        body: JSON.stringify({
+          userId: user.uid || user.name,
+          userName: user.name,
+          batch: user.batch,
+          date,
         }),
       });
       if (!response.ok) {
@@ -65,14 +88,14 @@ export const api = {
       }
       return response.json();
     },
-    release: async (user) => {
+    release: async (user, date) => {
       const authHeader = await getAuthHeader();
       const response = await fetch(`${API_BASE_URL}/bookings/release`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeader },
-        body: JSON.stringify({ 
-          userId: user.uid || user.name, 
-          date: new Date().toISOString().split('T')[0] 
+        body: JSON.stringify({
+          userId: user.uid || user.name,
+          date,
         }),
       });
       if (!response.ok) {
@@ -81,16 +104,31 @@ export const api = {
       }
       return response.json();
     },
-    getStatus: async (userId) => {
-      const today = new Date().toISOString().split('T')[0];
+    getStatus: async (userId, date) => {
       const authHeader = await getAuthHeader();
-      const response = await fetch(`${API_BASE_URL}/bookings/status?userId=${userId}&date=${today}`, {
-        headers: { ...authHeader }
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/bookings/status?userId=${userId}&date=${date}`,
+        {
+          headers: { ...authHeader },
+        },
+      );
       if (!response.ok) {
         throw new Error("Failed to get status");
       }
       return response.json();
-    }
-  }
+    },
+    getWeekly: async (startDate, endDate) => {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(
+        `${API_BASE_URL}/bookings/weekly?startDate=${startDate}&endDate=${endDate}`,
+        {
+          headers: { ...authHeader },
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Failed to get weekly data");
+      }
+      return response.json();
+    },
+  },
 };
