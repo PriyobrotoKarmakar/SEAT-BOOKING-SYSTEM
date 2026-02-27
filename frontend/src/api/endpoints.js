@@ -144,5 +144,13 @@ export const api = {
       }
       return response.json();
     },
+    getSpecialDays: async () => {
+      const authHeader = await getAuthHeader();
+      const response = await fetch(`${API_BASE_URL}/bookings/special-days`, {
+        headers: { ...authHeader },
+      });
+      if (!response.ok) throw new Error("Failed to get special days");
+      return response.json();
+    },
   },
 };

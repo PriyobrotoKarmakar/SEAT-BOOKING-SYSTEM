@@ -67,9 +67,9 @@ const Profile = () => {
   return (
     <Layout user={user}>
       <div className="max-w-3xl mx-auto space-y-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h1 className="text-3xl font-bold text-slate-800">My Profile</h1>
-          <p className="text-slate-500 mt-1">Manage your account details</p>
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700">
+          <h1 className="text-3xl font-bold text-slate-800 dark:text-slate-100">My Profile</h1>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Manage your account details</p>
         </div>
 
         <Card>
@@ -144,46 +144,46 @@ const Profile = () => {
               </form>
             ) : (
               <>
-                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                  <div className="bg-blue-100 p-3 rounded-full">
-                    <User className="text-blue-600" size={24} />
+                <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                  <div className="bg-blue-100 dark:bg-blue-900 p-3 rounded-full">
+                    <User className="text-blue-600 dark:text-blue-400" size={24} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm text-slate-500">Full Name</p>
-                    <p className="font-semibold text-slate-900">{user.name}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Full Name</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">{user.name}</p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                  <div className="bg-green-100 p-3 rounded-full">
-                    <Mail className="text-green-600" size={24} />
+                <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                  <div className="bg-green-100 dark:bg-green-900 p-3 rounded-full">
+                    <Mail className="text-green-600 dark:text-green-400" size={24} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm text-slate-500">Email Address</p>
-                    <p className="font-semibold text-slate-900">{user.email}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Email Address</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100">{user.email}</p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                    <div className="bg-purple-100 p-3 rounded-full">
-                      <Calendar className="text-purple-600" size={20} />
+                  <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div className="bg-purple-100 dark:bg-purple-900 p-3 rounded-full">
+                      <Calendar className="text-purple-600 dark:text-purple-400" size={20} />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm text-slate-500">Batch</p>
-                      <p className="font-semibold text-slate-900">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Batch</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">
                         {user.batch}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-lg">
-                    <div className="bg-orange-100 p-3 rounded-full">
-                      <Users className="text-orange-600" size={20} />
+                  <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div className="bg-orange-100 dark:bg-orange-900 p-3 rounded-full">
+                      <Users className="text-orange-600 dark:text-orange-400" size={20} />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm text-slate-500">Squad</p>
-                      <p className="font-semibold text-slate-900">
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Squad</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">
                         {user.squad}
                       </p>
                     </div>

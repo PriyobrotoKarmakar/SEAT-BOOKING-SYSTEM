@@ -8,23 +8,57 @@ const isDesignatedProcessingDay = (batch, date) => {
   if (day === 0 || day === 6) return false;
 
   if (batch === 1) {
-    return [1, 2, 3].includes(day); // Mon, Tue, Wed
+    return [1, 2, 3].includes(day);
   } else if (batch === 2) {
-    return [4, 5].includes(day); // Thu, Fri
+    return [4, 5].includes(day);
   }
   return false;
 };
 
-// Helper to get document ID for daily stats: YYYY-MM-DD
 const getDailyStatsId = (dateStr) => {
-  return dateStr; // Assuming dateStr is already YYYY-MM-DD
+  return dateStr;
+};
+
+const releaseUnbookedDesignatedSeats = async (date, t) => {
+  const dateObj = new Date(date.includes("T") ? date : date + "T00:00:00");
+  const dayOfWeek = dateObj.getDay();
+
+  if (dayOfWeek === 0 || dayOfWeek === 6) return 0;
+
+  const now = new Date();
+  const releaseTime = new Date(dateObj);
+  releaseTime.setDate(dateObj.getDate() - 1);
+  releaseTime.setHours(12, 0, 0, 0);
+
+  if (dayOfWeek === 1) {
+    releaseTime.setDate(dateObj.getDate() - 3);
+  }
+
+  if (now <= releaseTime) return 0;
+
+  const bookedSeatsQuery = await db
+    .collection("bookedSeats")
+    .where("date", "==", date)
+    .where("type", "==", "designated")
+    .get();
+
+  const bookedDesignatedSeats = new Set();
+  bookedSeatsQuery.forEach((doc) => {
+    const data = doc.data();
+    if (data.seatId <= 40) {
+      bookedDesignatedSeats.add(data.seatId);
+    }
+  });
+
+  const totalDesignatedSeats = 40;
+  const unbookedCount = totalDesignatedSeats - bookedDesignatedSeats.size;
+
+  return unbookedCount;
 };
 
 export const bookSeat = async (req, res) => {
   try {
     const { userId, userName, batch, date, type, seatId } = req.body;
-    // date format: "2023-10-27"
-    // seatId should be 1-50
 
     if (!userId || !batch || !date || !type || !seatId) {
       return res
@@ -46,7 +80,6 @@ export const bookSeat = async (req, res) => {
       .collection("dailyStats")
       .doc(getDailyStatsId(date));
 
-    // Run as a transaction to ensure seat counts and specific seat locking are atomic
     await db.runTransaction(async (t) => {
       const bookingDoc = await t.get(bookingRef);
       if (bookingDoc.exists) {
@@ -54,8 +87,19 @@ export const bookSeat = async (req, res) => {
       }
 
       const specificSeatDoc = await t.get(specificSeatRef);
+      let floatingUserToKick = null;
+
       if (specificSeatDoc.exists) {
-        throw new Error(`Seat #${seatId} is already booked by someone else.`);
+        const seatData = specificSeatDoc.data();
+        if (
+          type === "designated" &&
+          seatData.type === "floating" &&
+          seatId <= 40
+        ) {
+          floatingUserToKick = seatData.userId;
+        } else {
+          throw new Error(`Seat #${seatId} is already booked by someone else.`);
+        }
       }
 
       const dailyStatsDoc = await t.get(dailyStatsRef);
@@ -66,23 +110,32 @@ export const bookSeat = async (req, res) => {
             designatedCount: 0,
             floatingCount: 0,
             releasedCount: 0,
-            baseFloatingBuffer: 10, // Initial buffer
-            totalFloatingAvailable: 10, // Starts at 10
+            baseFloatingBuffer: 10,
+            totalFloatingAvailable: 10,
           };
 
-      // 0. Time Check for 3 PM Cutoff
-      // Ensure we parse the booking date as midnight LOCAL time to calculate the previous day correctly
       const bookingDate = new Date(
         date.includes("T") ? date : date + "T00:00:00",
       );
-      const previousDay = new Date(bookingDate);
-      previousDay.setDate(bookingDate.getDate() - 1);
-      previousDay.setHours(15, 0, 0, 0); // 3 PM previous day
+      const dayOfWeek = bookingDate.getDay();
+
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        throw new Error("This is holiday, enjoy at your home!");
+      }
+
+      const cutoffDate = new Date(bookingDate);
+
+      if (dayOfWeek === 1) {
+        cutoffDate.setDate(bookingDate.getDate() - 3);
+      } else {
+        cutoffDate.setDate(bookingDate.getDate() - 1);
+      }
+
+      cutoffDate.setHours(12, 0, 0, 0);
 
       const now = new Date();
-      const isAfterCutoff = now > previousDay;
+      const isAfterCutoff = now > cutoffDate;
 
-      // 1. Check if it's a Designated Booking
       const isDesignatedDay = isDesignatedProcessingDay(batch, date);
 
       if (type === "designated") {
@@ -93,6 +146,17 @@ export const bookSeat = async (req, res) => {
         }
         if (seatId > 40) {
           throw new Error("Designated seats must be chosen from Seats 1-40.");
+        }
+
+        if (floatingUserToKick) {
+          const kickedBookingRef = db
+            .collection("bookings")
+            .doc(`${date}_${floatingUserToKick}`);
+          t.delete(kickedBookingRef);
+          dailyData.floatingCount = Math.max(
+            0,
+            (dailyData.floatingCount || 0) - 1,
+          );
         }
 
         t.set(bookingRef, {
@@ -121,18 +185,47 @@ export const bookSeat = async (req, res) => {
       } else if (type === "floating") {
         if (!isAfterCutoff) {
           throw new Error(
-            "Floating seats can only be booked after 3 PM the day before.",
-          );
-        }
-        if (seatId < 41 || seatId > 50) {
-          throw new Error(
-            "Floating seats must be chosen from the Buffer Pool (Seats 41-50).",
+            "Floating seats can only be booked after 12 PM the day before.",
           );
         }
 
-        // Floating pool is base buffer (10) + any explicitly released seats.
-        // It's tracked by dailyData.totalFloatingAvailable which is incremented upon release.
-        const totalAvailable = dailyData.totalFloatingAvailable || 10;
+        const unbookedDesignatedSeats = await releaseUnbookedDesignatedSeats(
+          date,
+          t,
+        );
+
+        let totalAvailable = dailyData.totalFloatingAvailable || 10;
+        let canUseDesignatedSeats = false;
+
+        if (unbookedDesignatedSeats > 0) {
+          canUseDesignatedSeats = true; // Enable booking from designated zone if releases are active
+
+          const expectedFromDesignated = unbookedDesignatedSeats;
+          const alreadyCounted =
+            (dailyData.totalFloatingAvailable || 10) -
+            10 -
+            (dailyData.releasedCount || 0);
+
+          if (alreadyCounted < expectedFromDesignated) {
+            const additionalSeats =
+              expectedFromDesignated - Math.max(0, alreadyCounted);
+            totalAvailable += additionalSeats;
+
+            dailyData = {
+              ...dailyData,
+              totalFloatingAvailable: totalAvailable,
+              autoReleasedFromDesignated: expectedFromDesignated,
+            };
+          }
+        }
+
+        if (!canUseDesignatedSeats && (seatId < 41 || seatId > 50)) {
+          throw new Error(
+            "Floating seats must be chosen from the Buffer Pool (Seats 41-50).",
+          );
+        } else if (canUseDesignatedSeats && (seatId < 1 || seatId > 50)) {
+          throw new Error("Invalid seat ID. Must be between 1 and 50.");
+        }
 
         const currentFloatingBooked = dailyData.floatingCount || 0;
 
@@ -161,8 +254,6 @@ export const bookSeat = async (req, res) => {
           seatId,
         });
 
-        // If after cutoff, we are consuming what was potentially a designated seat
-        // But we just track it as floating count
         t.set(
           dailyStatsRef,
           {
@@ -176,7 +267,6 @@ export const bookSeat = async (req, res) => {
       }
     });
 
-    // Emit real-time update event
     io.emit("seatUpdate", { date, type: "book" });
 
     res.status(200).json({ message: "Seat booked successfully", date, type });
@@ -193,7 +283,25 @@ export const releaseSeat = async (req, res) => {
       return res.status(400).json({ error: "Missing userId or date" });
     }
 
-    const bookingRef = db.collection("bookings").doc(`${date}_${userId}`);
+    // Step 1: find the actual booking document (direct key first, then query fallback)
+    let bookingRef = db.collection("bookings").doc(`${date}_${userId}`);
+    const directCheck = await bookingRef.get();
+
+    if (!directCheck.exists) {
+      // Fallback: admin may have stored booking with a different userId format
+      const querySnap = await db
+        .collection("bookings")
+        .where("userId", "==", userId)
+        .where("date", "==", date)
+        .limit(1)
+        .get();
+
+      if (querySnap.empty) {
+        return res.status(400).json({ error: "No booking found to release" });
+      }
+      bookingRef = querySnap.docs[0].ref;
+    }
+
     const dailyStatsRef = db
       .collection("dailyStats")
       .doc(getDailyStatsId(date));
@@ -209,43 +317,43 @@ export const releaseSeat = async (req, res) => {
         .collection("bookedSeats")
         .doc(`${date}_${bookingData.seatId}`);
 
-      const dailyStatsDoc = await t.get(dailyStatsRef);
+      // Admin-override bookings don't use dailyStats counters — short-circuit
+      if (bookingData.type === "admin-override") {
+        t.delete(bookingRef);
+        t.delete(specificSeatRef);
+        return;
+      }
 
+      // Regular bookings need dailyStats to decrement counters
+      const dailyStatsDoc = await t.get(dailyStatsRef);
       if (!dailyStatsDoc.exists) {
         throw new Error("System error: Daily stats missing");
       }
 
       const dailyData = dailyStatsDoc.data();
 
-      // If it's a Designated Seat being released -> It becomes a Floating Seat for others
       if (bookingData.type === "designated") {
         t.delete(bookingRef);
         t.delete(specificSeatRef);
-
-        // Update stats:
-        // - decrease designatedCount
-        // - increase releasedCount
-        // - increase totalFloatingAvailable (This is the key requirement: "available for others")
         t.update(dailyStatsRef, {
           designatedCount: (dailyData.designatedCount || 0) - 1,
           releasedCount: (dailyData.releasedCount || 0) + 1,
           totalFloatingAvailable: (dailyData.totalFloatingAvailable || 10) + 1,
         });
-      }
-      // If it's a Floating Seat being released -> Just free up the space
-      else if (bookingData.type === "floating") {
+      } else if (bookingData.type === "floating") {
         t.delete(bookingRef);
         t.delete(specificSeatRef);
-
         t.update(dailyStatsRef, {
           floatingCount: (dailyData.floatingCount || 0) - 1,
         });
+      } else {
+        throw new Error(
+          `Cannot release a booking of unknown type: ${bookingData.type}`,
+        );
       }
     });
 
-    // Emit real-time update event
     io.emit("seatUpdate", { date, type: "release" });
-
     res.status(200).json({ message: "Seat released successfully" });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -254,7 +362,7 @@ export const releaseSeat = async (req, res) => {
 
 export const getWeeklyView = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query; // YYYY-MM-DD
+    const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
       return res.status(400).json({ error: "Start and end date required" });
@@ -281,24 +389,53 @@ export const getBookingStatus = async (req, res) => {
     if (!userId || !date)
       return res.status(400).json({ error: "Missing params" });
 
-    const bookingDoc = await db
+    // Try the standard key first
+    let bookingDoc = await db
       .collection("bookings")
       .doc(`${date}_${userId}`)
       .get();
 
+    // Fallback: query by userId + date fields (handles admin-override key mismatches)
+    if (!bookingDoc.exists) {
+      const querySnap = await db
+        .collection("bookings")
+        .where("userId", "==", userId)
+        .where("date", "==", date)
+        .limit(1)
+        .get();
+      if (!querySnap.empty) bookingDoc = querySnap.docs[0];
+    }
+
     if (bookingDoc.exists) {
       res.status(200).json({ booked: true, ...bookingDoc.data() });
     } else {
-      // Also return stats for that day so UI knows if floating is available
       const statsDoc = await db.collection("dailyStats").doc(date).get();
       const stats = statsDoc.exists
         ? statsDoc.data()
         : { totalFloatingAvailable: 10, floatingCount: 0 };
 
+      const unbookedDesignatedSeats = await releaseUnbookedDesignatedSeats(
+        date,
+        null,
+      );
+
+      let totalAvailable = stats.totalFloatingAvailable || 10;
+
+      if (unbookedDesignatedSeats > 0) {
+        const alreadyCounted =
+          (stats.totalFloatingAvailable || 10) -
+          10 -
+          (stats.releasedCount || 0);
+        if (alreadyCounted < unbookedDesignatedSeats) {
+          const additionalSeats =
+            unbookedDesignatedSeats - Math.max(0, alreadyCounted);
+          totalAvailable += additionalSeats;
+        }
+      }
+
       res.status(200).json({
         booked: false,
-        availableFloating:
-          (stats.totalFloatingAvailable || 10) - (stats.floatingCount || 0),
+        availableFloating: totalAvailable - (stats.floatingCount || 0),
       });
     }
   } catch (error) {
@@ -324,8 +461,8 @@ export const getDailyBookedSeats = async (req, res) => {
       bookedSeats.push({
         seatId: data.seatId,
         type: data.type,
-        userName: data.userName, // To show who booked it if needed
-        userId: data.userId, // Helpful for identifying "your" seat
+        userName: data.userName,
+        userId: data.userId,
       });
     });
 

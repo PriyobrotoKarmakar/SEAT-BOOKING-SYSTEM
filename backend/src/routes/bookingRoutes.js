@@ -36,4 +36,19 @@ router.get("/weekly", getWeeklyView);
 router.get("/status", getBookingStatus);
 router.get("/dailyBookedSeats", getDailyBookedSeats);
 
+// Public read of special-day overrides (admins and users both need this)
+router.get("/special-days", async (req, res) => {
+  try {
+    const { db } = await import("../config/firebase.js");
+    const snap = await db.collection("specialDays").get();
+    const days = {};
+    snap.forEach((doc) => {
+      days[doc.id] = doc.data();
+    });
+    res.status(200).json(days);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

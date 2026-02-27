@@ -4,13 +4,10 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-
-
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-  
     const usersRef = db.collection("users");
     const snapshot = await usersRef.where("email", "==", email).limit(1).get();
 
@@ -21,7 +18,6 @@ export const login = async (req, res) => {
     const userDoc = snapshot.docs[0];
     const userData = userDoc.data();
 
-  
     if (userData.password !== password) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -34,6 +30,7 @@ export const login = async (req, res) => {
         email: userData.email,
         batch: userData.batch,
         squad: userData.squad,
+        isAdmin: userData.isAdmin || false,
       },
     });
   } catch (error) {
@@ -49,7 +46,6 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
-   
     const usersRef = db.collection("users");
     const snapshot = await usersRef.where("email", "==", email).get();
 
@@ -57,11 +53,10 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     }
 
-   
     const newUser = {
       name,
       email,
-      password, 
+      password,
       batch: parseInt(batch),
       squad: parseInt(squad),
       createdAt: new Date().toISOString(),
@@ -103,7 +98,6 @@ export const updateProfile = async (req, res) => {
 
     await userRef.update(updateData);
 
-   
     const updatedDoc = await userRef.get();
     const userData = updatedDoc.data();
 
@@ -115,6 +109,7 @@ export const updateProfile = async (req, res) => {
         email: userData.email,
         batch: userData.batch,
         squad: userData.squad,
+        isAdmin: userData.isAdmin || false,
       },
     });
   } catch (error) {

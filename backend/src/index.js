@@ -8,6 +8,7 @@ dotenv.config();
 
 import bookingRoutes from "./routes/bookingRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -41,6 +42,7 @@ app.get("/health", (req, res) => {
 
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);

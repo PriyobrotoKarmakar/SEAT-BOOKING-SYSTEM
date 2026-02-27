@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { toast } from "sonner";
 
@@ -34,17 +34,31 @@ const Login = () => {
       const firebaseUser = userCredential.user;
 
       const profileSnap = await getDoc(doc(db, "users", firebaseUser.uid));
-      if (!profileSnap.exists()) {
-        throw new Error("User profile not found. Please contact an admin.");
+
+      let profile;
+      if (profileSnap.exists()) {
+        profile = profileSnap.data();
+      } else {
+        // Auth account exists but Firestore profile is missing (e.g. signup Firestore write failed).
+        // Create a minimal profile so the user can still log in, then send them to Profile to fill in details.
+        profile = {
+          name: firebaseUser.displayName || firebaseUser.email.split("@")[0],
+          email: firebaseUser.email,
+          batch: 1,
+          squad: 1,
+          createdAt: new Date().toISOString(),
+          profileIncomplete: true,
+        };
+        await setDoc(doc(db, "users", firebaseUser.uid), profile);
+        toast.info("Please complete your profile details.");
       }
 
-      const profile = profileSnap.data();
       localStorage.setItem(
         "user",
         JSON.stringify({ uid: firebaseUser.uid, ...profile }),
       );
       toast.success("Logged in successfully!");
-      navigate("/dashboard");
+      navigate(profile.profileIncomplete ? "/profile" : "/dashboard");
     } catch (error) {
       console.error(error);
       if (
@@ -62,7 +76,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold">Wissen Login</CardTitle>

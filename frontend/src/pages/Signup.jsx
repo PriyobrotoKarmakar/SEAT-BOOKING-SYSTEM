@@ -56,7 +56,17 @@ const Signup = () => {
         squad: parseInt(formData.squad),
         createdAt: new Date().toISOString(),
       };
-      await setDoc(doc(db, "users", firebaseUser.uid), profile);
+      try {
+        await setDoc(doc(db, "users", firebaseUser.uid), profile);
+      } catch (firestoreError) {
+        // Auth succeeded but Firestore write failed (likely security rules).
+        // Still let the user in — they can complete their profile later.
+        console.error("Firestore write failed:", firestoreError);
+        toast.warning("Account created, but profile save failed. Please update your profile after login.");
+        localStorage.setItem("user", JSON.stringify({ uid: firebaseUser.uid, ...profile, profileIncomplete: true }));
+        navigate("/profile");
+        return;
+      }
 
       localStorage.setItem(
         "user",
@@ -79,7 +89,7 @@ const Signup = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
