@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar, CheckCircle, Clock, Users } from "lucide-react";
 import { api, socket } from "../api/endpoints";
+import { adminApi } from "../api/adminEndpoints";
 import { toast } from "sonner";
 import Layout from "../components/Layout";
 import { AdminUserManagement } from "../components/AdminUserManagement";
 import { AdminSeatOverride } from "../components/AdminSeatOverride";
-import { Shield } from "lucide-react";
+import { Shield, Sun, Umbrella } from "lucide-react";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -37,6 +38,7 @@ const Dashboard = () => {
   // Admin State
   const [isAdminActionOpen, setIsAdminActionOpen] = useState(false);
   const [adminTargetSeat, setAdminTargetSeat] = useState(null);
+  const [specialDays, setSpecialDays] = useState({});
 
   const batch1Days = ["Monday", "Tuesday", "Wednesday"];
   const batch2Days = ["Thursday", "Friday"];
@@ -63,6 +65,13 @@ const Dashboard = () => {
 
         const bookedList = await api.seats.getDailyBookedSeats(selectedDate);
         setDailyBookedSeats(bookedList);
+
+        try {
+          const sd = await api.seats.getSpecialDays();
+          setSpecialDays(sd || {});
+        } catch {
+          /* non-critical */
+        }
 
         const today = new Date();
         const currentDayOfWk = today.getDay();
@@ -104,14 +113,30 @@ const Dashboard = () => {
 
     socket.on("seatUpdate", handleSeatUpdate);
 
+    // Real-time holiday override updates
+    const handleSpecialDayUpdate = ({ date, type }) => {
+      setSpecialDays((prev) => {
+        const next = { ...prev };
+        if (type === null) delete next[date];
+        else next[date] = { date, type };
+        return next;
+      });
+    };
+    socket.on("specialDayUpdate", handleSpecialDayUpdate);
+
     return () => {
       socket.off("seatUpdate", handleSeatUpdate);
+      socket.off("specialDayUpdate", handleSpecialDayUpdate);
       socket.disconnect();
     };
   }, [user, selectedDate]);
 
   const dayOfWeek = selectedDateObj.getDay();
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const workingOverride = specialDays[selectedDate]?.type === "working";
+  const holidayOverride = specialDays[selectedDate]?.type === "holiday";
+  // A day is a holiday if: it's a weekend (not overridden) OR a weekday marked as holiday
+  const isEffectiveHoliday = (isWeekend && !workingOverride) || holidayOverride;
 
   const isDesignatedDay =
     (Number(user.batch) === 1 && batch1Days.includes(currentDay)) ||
@@ -232,7 +257,7 @@ const Dashboard = () => {
                     <Clock className="text-blue-600" />
                     Action Center
                   </div>
-                  <div className="flex items-center gap-2 text-sm font-normal">
+                  <div className="flex items-center gap-2 text-sm font-normal flex-wrap">
                     <label htmlFor="booking-date" className="text-slate-600">
                       Select Date:
                     </label>
@@ -244,6 +269,59 @@ const Dashboard = () => {
                       onChange={(e) => setSelectedDate(e.target.value)}
                       className="border dark:border-slate-600 rounded px-2 py-1 text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800"
                     />
+                    {user.isAdmin && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            if (holidayOverride || workingOverride) {
+                              await adminApi.removeSpecialDay(selectedDate);
+                              toast.success(
+                                `Override removed for ${selectedDate}`,
+                              );
+                            } else if (isWeekend) {
+                              await adminApi.setSpecialDay(
+                                selectedDate,
+                                "working",
+                              );
+                              toast.success(
+                                `${selectedDate} set as Working Day ✅`,
+                              );
+                            } else {
+                              await adminApi.setSpecialDay(
+                                selectedDate,
+                                "holiday",
+                              );
+                              toast.success(
+                                `${selectedDate} set as Holiday 🌴`,
+                              );
+                            }
+                          } catch (e) {
+                            toast.error(e.message);
+                          }
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
+                          holidayOverride
+                            ? "bg-red-100 text-red-700 border-red-300 hover:bg-red-200"
+                            : workingOverride
+                              ? "bg-green-100 text-green-700 border-green-300 hover:bg-green-200"
+                              : isWeekend
+                                ? "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200"
+                                : "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-200"
+                        }`}
+                      >
+                        {holidayOverride || workingOverride ? (
+                          <>&#x2715; Remove Holiday</>
+                        ) : isWeekend ? (
+                          <>
+                            <Sun size={12} /> Override: Working Day
+                          </>
+                        ) : (
+                          <>
+                            <Umbrella size={12} /> Mark as Holiday
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </CardTitle>
               </CardHeader>
@@ -298,7 +376,10 @@ const Dashboard = () => {
                         else if (isSelected)
                           bgClass =
                             "bg-yellow-100 border-yellow-400 text-yellow-700 ring-2 ring-yellow-400";
-                        else if (isWeekend || (isInvalidZone && !bookingStatus))
+                        else if (
+                          isEffectiveHoliday ||
+                          (isInvalidZone && !bookingStatus)
+                        )
                           bgClass =
                             "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-50";
 
@@ -318,7 +399,7 @@ const Dashboard = () => {
                                 return;
                               }
 
-                              if (isWeekend) {
+                              if (isEffectiveHoliday) {
                                 toast.info(
                                   "This is holiday, enjoy at your home!",
                                 );
@@ -344,7 +425,7 @@ const Dashboard = () => {
                             h-10 rounded-md border text-xs font-bold flex items-center justify-center transition-all duration-200 select-none
                             ${bgClass}
                             ${isBufferSeat ? "border-orange-300 ring-1 ring-orange-200" : ""}
-                            ${(!isBooked || canOverride) && !bookingStatus && !isInvalidZone && !isWeekend ? "active:scale-95 hover:shadow-sm" : ""}
+                            ${(!isBooked || canOverride) && !bookingStatus && !isInvalidZone && !isEffectiveHoliday ? "active:scale-95 hover:shadow-sm" : ""}
                           `}
                             title={
                               isMySeat
@@ -353,8 +434,8 @@ const Dashboard = () => {
                                   ? `Booked by ${isBooked.userName} (Click to Override)`
                                   : isBooked
                                     ? `Booked by ${isBooked.userName}`
-                                    : isWeekend
-                                      ? "Weekend Holiday - Not available"
+                                    : isEffectiveHoliday
+                                      ? "Holiday - Not available"
                                       : isInvalidZone
                                         ? "Not available for your current booking type"
                                         : "Available"
@@ -397,7 +478,7 @@ const Dashboard = () => {
 
                 {!bookingStatus ? (
                   <div className="space-y-4 border-t pt-4">
-                    {isWeekend ? (
+                    {isEffectiveHoliday ? (
                       <div className="bg-blue-50 rounded-lg p-6 border border-blue-100 text-center">
                         <div className="mx-auto w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-3">
                           <span className="text-2xl">🏖️</span>
